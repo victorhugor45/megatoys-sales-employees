@@ -22,8 +22,8 @@ def connect_db():
         st.error(f"Error al conectar a la base de datos: {e}")
         return None
 
-# Opción 1: Usar TTL (Time To Live) para el caché
-@st.cache_data(ttl=1)  # El caché se invalida después de 1 segundo
+												   
+@st.cache_data(ttl=1)
 def load_data():
     conn = connect_db()
     if conn:
@@ -32,7 +32,8 @@ def load_data():
                 SELECT id_empleado, nombre, 
                        NULLIF(TRIM(nro_factura), '') as nro_factura,
                        fecha, 
-                       valor
+                       valor,
+                       tipo_venta
                 FROM empleados;
             """
             df = pd.read_sql(query, conn)
@@ -41,15 +42,15 @@ def load_data():
         except Exception as e:
             st.error(f"Error al cargar datos: {e}")
             conn.close()
-            return pd.DataFrame(columns=["id_empleado", "nombre", "nro_factura", "fecha", "valor"])
-    return pd.DataFrame(columns=["id_empleado", "nombre", "nro_factura", "fecha", "valor"])
+            return pd.DataFrame(columns=["id_empleado", "nombre", "nro_factura", "fecha", "valor", "tipo_venta"])
+    return pd.DataFrame(columns=["id_empleado", "nombre", "nro_factura", "fecha", "valor", "tipo_venta"])
 
 def check_existing_invoice(cursor, nro_factura):
     query = "SELECT id_empleado FROM empleados WHERE nro_factura = %s;"
     cursor.execute(query, (nro_factura,))
     return cursor.fetchone() is not None
 
-def save_data(id_empleado, nombre, nro_factura, valor):
+def save_data(id_empleado, nombre, nro_factura, valor, tipo_venta):
     conn = connect_db()
     if conn:
         try:
@@ -91,14 +92,15 @@ def save_data(id_empleado, nombre, nro_factura, valor):
             UPDATE empleados
             SET nro_factura = %s, 
                 fecha = %s, 
-                valor = %s
+                valor = %s,
+                tipo_venta = %s
             WHERE id_empleado = %s;
             """
-            cursor.execute(query_update, (nro_factura, datetime.now(), valor_numeric, id_empleado))
+            cursor.execute(query_update, (nro_factura, datetime.now(), valor_numeric, tipo_venta, id_empleado))
             conn.commit()
             st.success("Datos actualizados correctamente.")
             
-            # Opción 2: Limpiar el caché después de guardar
+            # Limpiar el caché después de guardar
             st.cache_data.clear()
             
             conn.close()
@@ -125,21 +127,32 @@ def main():
 
             # Mostrar estado actual
             factura_actual = empleado.iloc[0]["nro_factura"]
+            
             if pd.isna(factura_actual) or factura_actual is None or str(factura_actual).strip() == '':
                 st.info("Este empleado no tiene factura asignada.")
+				 
+															
+                
+                # Solo mostrar los campos si no tiene factura
+                nro_factura = st.text_input("Ingrese el número de factura (obligatorio):")
+                valor_factura = st.text_input("Ingrese el valor de la factura (obligatorio):")
+                tipo_venta = st.selectbox("Seleccione el tipo de venta", ["Contado", "Crédito"])
+
+                if st.button("Guardar"):
+                    if not nro_factura or not nro_factura.strip():
+                        st.error("El número de factura es obligatorio.")
+                    elif not valor_factura or not valor_factura.strip():
+                        st.error("El valor de la factura es obligatorio.")
+                    else:
+                        save_data(id_empleado, nombre_empleado, nro_factura, valor_factura, tipo_venta)
+															
+                        st.rerun()
             else:
                 st.info(f"Factura actual: {factura_actual}")
-
-            nro_factura = st.text_input("Ingrese el número de factura (obligatorio):")
-            valor_factura = st.text_input("Ingrese el valor de la factura (opcional):")
-
-            if st.button("Guardar"):
-                if nro_factura and nro_factura.strip():
-                    save_data(id_empleado, nombre_empleado, nro_factura, valor_factura)
-                    # Recargar los datos después de guardar
-                    st.rerun()
-                else:
-                    st.error("El número de factura es obligatorio.")
+                valor_actual = empleado.iloc[0]["valor"]
+                tipo_venta_actual = empleado.iloc[0]["tipo_venta"] or "No especificado"
+                st.info(f"Valor: ${valor_actual:,.2f}")
+                st.info(f"Tipo de venta: {tipo_venta_actual}")
         else:
             st.error("ID de empleado no encontrado.")
 
